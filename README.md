@@ -11,7 +11,7 @@
 GoodAir, laboratoire R&D de TotalGreen, a besoin de données fiables toutes les heures pour permettre à ses chercheurs de surveiller la qualité de l'air, détecter les variations extrêmes et anticiper les pics de pollution sur les principales villes de France.
 
 ## Architecture
-## 🛠️ Stack technique
+## Stack technique
 
 | Couche | Outils |
 |---|---|
@@ -23,14 +23,14 @@ GoodAir, laboratoire R&D de TotalGreen, a besoin de données fiables toutes les 
 | Monitoring | Prometheus · AlertManager · Grafana |
 | Conteneurisation | Docker · Docker Compose |
 
-## 📊 Données collectées
+##  Données collectées
 
 - **20 villes** : Paris, Marseille, Lyon, Toulouse, Nice, Nantes, Strasbourg, Montpellier, Bordeaux, Lille...
 - **Qualité de l'air** (AQICN) : AQI global · PM2.5 · PM10 · NO2 · O3 · CO · SO2
 - **Météo** (OpenWeatherMap) : Température · Humidité · Vent · Pression · Couverture nuageuse
 - **Collecte** : toutes les heures · stockage incrémental · partitionnement par date/heure
 
-## 🚀 Lancer le projet
+##  Lancer le projet
 
 ```bash
 # 1. Cloner le repo
@@ -50,8 +50,8 @@ docker-compose up -d
 # Grafana   → http://localhost:3001
 ```
 
-## 🗄️Modélisation PostgreSQL
-## 🔒 Sécurité & RGPD
+## Modélisation PostgreSQL
+##  Sécurité & RGPD
 
 - Aucun secret dans le code — variables d'environnement via `.env`
 - Hébergement et traitements localisés en France / UE
