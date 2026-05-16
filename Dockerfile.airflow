@@ -1,0 +1,28 @@
+FROM apache/airflow:2.7.3-python3.9
+
+# On installe Java 11 + Spark dans l'image Airflow
+USER root
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openjdk-11-jre-headless \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# (optionnel mais propre) déclarer JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:/opt/spark/bin:${PATH}"
+
+# Installe Spark 3.1.1 dans /opt/spark
+RUN curl -fsSL "https://archive.apache.org/dist/spark/spark-3.1.1/spark-3.1.1-bin-hadoop3.2.tgz" \
+    | tar -xz -C /opt && \
+    ln -s /opt/spark-3.1.1-bin-hadoop3.2 /opt/spark
+
+# AJOUT CRITIQUE: Installation du pilote JDBC PostgreSQL
+RUN mkdir -p /opt/airflow/jars
+RUN curl -fsSL "https://jdbc.postgresql.org/download/postgresql-42.7.4.jar" \
+    -o /opt/airflow/jars/postgresql-42.7.4.jar
+# Avec Java 11, plus besoin des gros JAVA_TOOL_OPTIONS pour les modules
+ENV JAVA_TOOL_OPTIONS=""
+
+USER airflow

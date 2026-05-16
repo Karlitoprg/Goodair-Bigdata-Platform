@@ -1,0 +1,17 @@
+global:
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_auth_username: 'kenzalam98@gmail.com'
+  smtp_auth_password: '${ALERTMANAGER_SMTP_PASSWORD}'
+  smtp_from: 'kenzalam98@gmail.com'
+  smtp_require_tls: true
+
+route:
+  receiver: 'goodair-epsi-email'
+
+receivers:
+- name: 'goodair-epsi-email'
+  email_configs:
+  - to: 'kenza.lamrani@ecoles-epsi.net'
+    send_resolved: true
+    headers:
+      Subject: 'ALERTE {{ .CommonLabels.severity | toUpper }} {{ .CommonLabels.alertname }} - Tâche {{ .CommonLabels.task_id }}'

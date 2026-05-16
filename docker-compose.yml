@@ -1,0 +1,319 @@
+version: "3.8"
+
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+  AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: "1800"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: "5"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: "10"
+  AIRFLOW__CORE__FERNET_KEY: _uPfB8_gnZXzOZFX8iZHkh0dRkCk3PK9NszC-LsijHA=
+  AIRFLOW__WEBSERVER__SECRET_KEY: ifpQqxI7jX-17gl---Uij-ztFP_i1wblaDNZXOcYZR8=
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Paris
+  AIRFLOW__WEBSERVER__WORKERS: 1
+  AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: 120
+  AIRFLOW__METRICS__STATSD_ON: "true"
+  AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+  AIRFLOW__METRICS__STATSD_PORT: 9125
+  AIRFLOW__METRICS__STATSD_PREFIX: "airflow"
+  AIRFLOW_UID: "50000"
+  AIRFLOW_GID: "0"
+  TZ: Europe/Paris
+  # NE PAS définir AIRFLOW_CONN_SPARK_DEFAULT (on ne l'utilise plus)
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      TZ: Europe/Paris
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U airflow -d airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 5s
+    shm_size: 1g
+    mem_limit: 2g
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "checkpoint_timeout=15min"
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_compression=on"
+      - -c
+      - statement_timeout=0
+      - -c
+      - tcp_keepalives_idle=30
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-namenode
+    hostname: hadoop
+    restart: unless-stopped
+    environment:
+      - CLUSTER_NAME=goodair
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop:9000
+      - HDFS_NAMENODE_USER=root
+      - TZ=Europe/Paris
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - ./hdfs/nn_data:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-datanode
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop:9000
+      - HDFS_DATANODE_USER=root
+      - TZ=Europe/Paris
+    ports:
+      - "9864:9864"
+    volumes:
+      - ./hdfs/dn_data:/hadoop/dfs/data
+
+  spark-master:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark-master
+    container_name: spark-master
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop:9000
+      - TZ=Europe/Paris
+    ports:
+      - "7077:7077"
+      - "18081:8080"
+    volumes:
+      - ./jobs:/opt/jobs
+      - ./spark_conf:/spark/conf
+      - ./jars:/opt/jars
+
+
+  spark-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark-worker
+    container_name: spark-worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=3G
+      - SPARK_WORKER_CORES=1
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop:9000
+      - TZ=Europe/Paris
+    mem_limit: 4g          # ✅ IMPORTANT
+    shm_size: 1g           # (optionnel mais utile pour spark)- TZ=Europe/Paris
+    ports:
+      - "18082:8081"
+    volumes:
+      - ./jobs:/opt/jobs
+      - ./spark_conf:/spark/conf
+      - ./jars:/opt/jars
+
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    image: mspr-airflow:latest
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *airflow-env
+    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./jobs:/opt/jobs
+    command: >
+      bash -lc "airflow db migrate &&
+                airflow users create
+                  --username admin
+                  --firstname Admin
+                  --lastname User
+                  --role Admin
+                  --email admin@example.com
+                  --password admin || true"
+    restart: "no"
+
+  airflow-webserver:
+    image: mspr-airflow:latest
+    container_name: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
+      AIRFLOW__WEBSERVER__WORKERS: "2"
+    user: "0:0"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./jobs:/opt/jobs
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["webserver"]
+
+  airflow-scheduler:
+    image: mspr-airflow:latest
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "60"
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "60"
+    user: "0:0"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./jobs:/opt/jobs
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["scheduler"]
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - default
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/rules/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - default
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana_provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - default
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+     - DATA_SOURCE_NAME=postgresql://airflow:airflow@postgres:5432/airflow?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "9187:9187"
+    networks:
+      - default
+
+  statsd-exporter:
+    image: prom/statsd-exporter:latest
+    container_name: statsd-exporter
+    restart: unless-stopped
+    ports:
+      - "9102:9102"       # endpoint Prometheus
+      - "9125:9125/udp"   # port StatsD (Airflow envoie ici)
+    networks:
+      - default
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - default
+
+
+networks:
+  default:
+    name: goodair
+    driver: bridge
+
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  airflow_logs:
+

@@ -1,0 +1,14 @@
+groups:
+- name: goodair_pipeline_alerts
+  rules:
+  - alert: GoodAirTaskFailed
+    expr: |
+      sum(increase({job="airflow_statsd", __name__=~"airflow_ti_finish_goodair_hourly_.*_failed"}[5m])) > 0
+    for: 1m
+    labels:
+      severity: critical
+      pipeline: GoodAir
+      dag_id: goodair_hourly
+    annotations:
+      summary: "Échec critique pipeline GoodAir (DAG: goodair_hourly)"
+      description: "Au moins une tâche du DAG goodair_hourly a échoué sur les 5 dernières minutes."
