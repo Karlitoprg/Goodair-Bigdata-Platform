@@ -57,7 +57,7 @@ docker-compose up -d
 - Hébergement et traitements localisés en France / UE
 - Accès aux données sécurisé par authentification (Airflow, Metabase)
 
-## 👥 Équipe
+##  Équipe
 
 Projet réalisé en équipe de 4 dans le cadre de la certification EPSI Expert Ingénierie des Données.
 
